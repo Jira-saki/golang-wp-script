@@ -110,13 +110,29 @@ scanwp() {
 }
 ```
 
-## 🛡️ Smart Noise Filtering & Safety
+## 🛡️ Smart Noise Filtering & Engine Features (v2.2)
 
-`xserver-walker` includes strict filtering rules to minimize noise and reduce false positives:
+`xserver-walker` uses targeted heuristic filtering to eliminate noise in production multi-tenant environments:
 
-- **Zero-Byte Routing Suppression:** Ignores common index.php silencing files inside writable directories.
-- **Shallow Plugin Directory Bounds (v2.1):** Enforces a path-segment constraint inside `wp-content/plugins/` so only top-level plugin files are parsed.
-- **Legitimate Firewall Profiles:** Maps known administrative stubs (for example, AIOS Firewall local context files) to avoid false alarms.
+- **Two-Tier Threat Classification:**
+  - `⚠️ [SUSPICIOUS]`: Unflagged `.php` files placed inside `/wp-content/uploads/`.
+  - `🚨 [HIGH RISK]`: Obfuscated `index.php` backdoors in upload paths containing control-flow jumps (`goto`) or execution payloads.
+- **`isSafeIndexPHP()` Inspection:** Inspects `index.php` files inside uploads. Legitimate empty files or standard `Silence is golden.` headers pass cleanly, while encoded payloads trigger high-severity alerts.
+- **Directory Path Precision:** Matches strict `/wp-content/uploads/` path strings rather than loose keyword matching, preventing false positives on legitimate plugin classes.
+- **Known-Good Exclusions:** Automatically skips administrative firewall rulesets (for example, AIOS `uploads/aios/firewall-rules/`).
+
+Example scanner output:
+
+```text
+🔍 [Golang Scanner] Starting security sweep in: ./public_html
+--------------------------
+📦 [PLUGIN DETECTED] All in One SEO (v5.0.0.1)
+📦 [PLUGIN DETECTED] Wordfence Security (v9.0.0)
+🚨 [HIGH RISK] Malicious index.php found in uploads: public_html/wp-content/uploads/2026/08/index.php
+⚠️  [SUSPICIOUS] PHP file hiding in uploads directory: public_html/wp-content/uploads/test.php
+--------------------------
+✅ [Golang Scanner] Scan completed.
+```
 
 ## 🚨 Incident Response Case Study
 

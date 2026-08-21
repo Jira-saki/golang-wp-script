@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// ฟังก์ชันแกะรอยหาป้ายชื่อและเวอร์ชันปลั๊กอิน (คงเดิม ไว้ใจได้)
+// ฟังก์ชันแกะรอยหาป้ายชื่อและเวอร์ชันปลั๊กอิน
 func checkPluginHeader(filePath string) (string, string) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -36,6 +36,21 @@ func checkPluginHeader(filePath string) (string, string) {
 	return pluginName, version
 }
 
+// 🛡️ เช็กเนื้อหาไฟล์ index.php ว่าเป็นไฟล์ว่าง/Silence is golden ของจริงหรือไม่
+func isSafeIndexPHP(filePath string) bool {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return false
+	}
+	text := strings.TrimSpace(string(content))
+	
+	// อนุญาตเฉพาะไฟล์ว่าง หรือโค้ดมาตรฐาน WordPress
+	if text == "" || text == "<?php" || strings.Contains(text, "Silence is golden.") {
+		return true
+	}
+	return false
+}
+
 func main() {
 	root := "./public_html"
 
@@ -43,33 +58,37 @@ func main() {
 	fmt.Println("--------------------------")
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
+		if err != nil || d.IsDir() {
 			return nil
 		}
 
-		// 🛡️ ท่าที่ 1: ค่ายกลกรองภัยในโฟลเดอร์ Uploads (โค้ดดั้งเดิมของพี่ Jirasak)
-		if strings.Contains(path, "uploads") && strings.HasSuffix(strings.ToLower(path), ".php") {
-			if strings.HasSuffix(strings.ToLower(path), "index.php") {
+		cleanPath := filepath.ToSlash(path)
+
+		// 🛡️ ท่าที่ 1: ตรวจจับไฟล์ PHP ใน wp-content/uploads/
+		if strings.Contains(cleanPath, "/wp-content/uploads/") && strings.HasSuffix(strings.ToLower(cleanPath), ".php") {
+			
+			// 1. ยกเว้นโฟลเดอร์คอนฟิกไฟร์วอลล์ AIOS (Known Safe)
+			if strings.Contains(cleanPath, "uploads/aios/firewall-rules/") {
 				return nil
 			}
+
+			// 2. ตรวจสอบ index.php: ถ้าเป็น Silence is golden ข้ามได้ แต่ถ้ามีโค้ดแปลกปลอมให้แจ้งเตือนทันที!
+			if strings.HasSuffix(strings.ToLower(cleanPath), "index.php") {
+				if isSafeIndexPHP(path) {
+					return nil
+				}
+				fmt.Printf("🚨 [HIGH RISK] Malicious index.php found in uploads: %s\n", path)
+				return nil
+			}
+
 			fmt.Printf("⚠️  [SUSPICIOUS] PHP file hiding in uploads directory: %s\n", path)
 		}
 
-		// 👑 ท่าที่ 2: สแกนหาปลั๊กอินเวอร์ชันล่าสุด (v2.1 อุดบั๊ก Wordfence)
-		if strings.Contains(path, "wp-content/plugins/") && strings.HasSuffix(strings.ToLower(path), ".php") {
-			
-			// 💡 ทริคตัดสัญญาณรบกวน: แบ่งพาธออกเป็นท่อนๆ เพื่อเช็กความลึก
-			// พาธมาตรฐาน: public_html/wp-content/plugins/plugin-dir/main-file.php
-			cleanPath := filepath.ToSlash(path)
+		// 👑 ท่าที่ 2: สแกนหาปลั๊กอิน
+		if strings.Contains(cleanPath, "wp-content/plugins/") && strings.HasSuffix(strings.ToLower(cleanPath), ".php") {
 			segments := strings.Split(cleanPath, "wp-content/plugins/")
-			
 			if len(segments) > 1 {
 				subSegments := strings.Split(segments[1], "/")
-				// ถ้าไฟล์ .php นอนอยู่ในโฟลเดอร์ย่อยลึกลงไปอีก (subSegments มากกว่า 2) ให้ข้ามเลย!
-				// เช่น "wordfence/models/common/wfConfig.php" -> ยาว 4 ท่อน = ข้าม!!
 				if len(subSegments) > 2 {
 					return nil
 				}
@@ -77,7 +96,6 @@ func main() {
 
 			pName, vNum := checkPluginHeader(path)
 			if pName != "" && vNum != "" {
-				// ตรวจสอบเพิ่มเติม: ถ้าชื่อปลั๊กอินมีเครื่องหมายแปลกๆ หลุดมา ให้ตีเป็นขยะแล้วข้ามไป
 				if strings.Contains(pName, "</td>") || strings.Contains(pName, "wp_kses") {
 					return nil
 				}
